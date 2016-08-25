@@ -1,0 +1,4 @@
+Revision history for Dancer::Plugin::Auth::Extensible::Provider::LDAP
+
+0.01    2016-08-26
+        Initial version split off from core DPAE distribution and released.
