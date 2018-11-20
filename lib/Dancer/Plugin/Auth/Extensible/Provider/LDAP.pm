@@ -7,7 +7,7 @@ use base "Dancer::Plugin::Auth::Extensible::Provider::Base";
 use Net::LDAP;
 use Dancer qw(warning);
 
-=head1 NAME 
+=head1 NAME
 
 Dancer::Plugin::Auth::Extensible::LDAP - LDAP authentication provider
 
@@ -25,7 +25,13 @@ This provider requires the following parameters in it's config file:
 
 =item * server
 
-The LDAP server url. 
+The LDAP server url.
+
+=item * ldapopts
+
+TODO
+
+hash reference of additional Net::LDAP options
 
 =item * basedn
 
@@ -36,13 +42,42 @@ The base dn user for all search queries (e.g. 'dc=ofosos,dc=org').
 This must be the distinguished name of a user capable of binding to
 and reading the directory (e.g. 'cn=Administrator,cn=users,dc=ofosos,dc=org').
 
-=item * password
+=item * bindpw
 
 The password of above named user
 
-=item * usergroup
+=item * searchbase
 
-The group where users are to be found (e.g. 'cn=users,dc=ofosos,dc=org')
+The group where users are to be found (e.g. 'cn=users,dc=ofosos,dc=org' or
+'ou=people,dc=donotuse,dc=de')
+
+=item * userrdn
+
+user RDN ( Relative Distinguished Name ) like "uid" or "cn". For example one
+can bind to ldap using uid=username,ou=people,dc=donotuse,dc=de or
+cn=Administrator,cn=users,dc=ofosos,dc=org
+
+=item * grouprdn
+
+Similar to userrdn, "ou" or "cn" or ...
+group RDN prefix for a group DN (e.g. 'ou=webgroup,dc=donotuse,dc=de'
+or 'cn=users,dc=donotuse,dc=de')
+
+=item * userattrs
+
+Return user attributes:
+ - cn dn name userPrincipalName sAMAcountName uid ...
+
+=item * objectClass
+
+Filter used when searching for users.
+For example ('objectClass=posixAccount')
+
+=item * rolefilter
+
+depends on objectClass, for example for posixGroup objectClass rolefilter
+is 'memberUid', for groupOfUniqueNames reolefilter is 'uniqueMember=uid'
+or 'uniqueMember=cn' and so on.
 
 =item * roles
 
@@ -58,7 +93,7 @@ This is a comma separated list of LDAP group objects that are to be queried.
 
 =item authenticate_user
 
-Given the sAMAccountName and password entered by the user, return true if they are
+Given the userrdn (uid,sAMAccountName,..) and password entered by the user, return true if they are
 authenticated, or false if not.
 
 =cut
@@ -68,10 +103,13 @@ sub authenticate_user {
 
     my $settings = $self->realm_settings;
 
+    my $ldapopts = $settings->{ldapopts} || "";
     my $ldap = Net::LDAP->new($settings->{server}) or die "$!";
 
+    # do not hardcode userrdn
+
     my $mesg = $ldap->bind(
-        "cn=" . $username . "," . $settings->{usergroup},
+        $settings->{userrdn} . "=" . $username . "," . $settings->{searchbase},
         password => $password);
 
     $ldap->unbind;
@@ -80,10 +118,14 @@ sub authenticate_user {
     return not $mesg->is_error;
 }
 
+
+
 =item get_user_details
 
 Given a sAMAccountName return the common name (cn), distinguished name (dn) and
 user principal name (userPrincipalName) in a hash ref.
+
+Given uid return user attributes
 
 =cut
 
@@ -94,9 +136,18 @@ sub get_user_details {
 
     my $ldap = Net::LDAP->new($settings->{server}) or die "$@";
 
-    my $mesg = $ldap->bind(
+    # try anonymous bind if no authdn is defined
+    # if no authdn and password is defined do an anynymous bind?
+    # to be tested
+    my $mesg;
+    if ( $settings->{authdn} ) {
+    $mesg = $ldap->bind(
         $settings->{authdn},
-        password => $settings->{password});
+        password => $settings->{bindpw});
+    }
+    else {
+        $mesg = $ldap->bind();
+    }
 
     if ($mesg->is_error) {
         warning($mesg->error);
@@ -104,14 +155,14 @@ sub get_user_details {
 
     $mesg = $ldap->search(
         base => $settings->{basedn},
-        filter => "(&(objectClass=user)(sAMAccountName=" . $username . "))",
-        );
+        filter => "(&(objectClass=" . $settings->{objectClass} . ")(". $settings->{userrdn} ."=" . $username . "))",
+    );
 
     if ($mesg->is_error) {
         warning($mesg->error);
     }
 
-    my @extract = qw(cn dn name userPrincipalName sAMAccountName);
+    my @extract =  (split(/\s/,$settings->{userattrs}));
     my %props = ();
 
     if ($mesg->entries > 0) {
@@ -120,30 +171,38 @@ sub get_user_details {
         }
     } else {
         warning("Error finding user details.");
-    } 
+    }
 
     $ldap->unbind;
-    $ldap->disconnect; 
+    $ldap->disconnect;
 
     return \%props;
 }
 
+
 =item get_user_roles
 
-Given a sAMAccountName, return a list of roles that user has.
+Given a CN, return a list of roles that user has.
 
 =cut
 
 sub get_user_roles {
     my ($self, $username) = @_;
-
     my $settings = $self->realm_settings;
 
     my $ldap = Net::LDAP->new($settings->{server}) or die "$@";
 
-    my $mesg = $ldap->bind(
-        $settings->{authdn},
-        password => $settings->{password});
+    # try anonymous bind if no authdn is defined
+
+    my $mesg;
+    if ( $settings->{authdn} ) {
+        $mesg = $ldap->bind(
+            $settings->{authdn},
+            password => $settings->{bindpw});
+    }
+    else {
+        $mesg = $ldap->bind();
+    }
 
     if ($mesg->is_error) {
         warning($mesg->error);
@@ -155,8 +214,8 @@ sub get_user_roles {
     foreach my $role (@relevantroles) {
         $mesg = $ldap->search(
             base => $settings->{basedn},
-            filter => "(&(objectClass=user)(sAMAccountName=" . $username . ")(memberof=cn=". $role . "," . $settings->{usergroup} . "))",
-            );
+            filter => "(&(|(" . $settings->{rolefilter} . "=" . $username . ")(" . $settings->{rolefilter} . "=" . $username . "," . $settings->{searchbase} . "))(" . $settings->{grouprdn} . "=" . $role . "))",
+        );
         if ($mesg->is_error) {
             warning($mesg->error);
         }
@@ -174,6 +233,7 @@ sub get_user_roles {
 
     return \@roles;
 }
+
 
 =back
 

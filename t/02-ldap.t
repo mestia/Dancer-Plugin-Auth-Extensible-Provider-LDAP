@@ -10,19 +10,19 @@ my $noerr = qclass(
     -with_new => 1,
     is_error => 0,
     );
-    
+
 my $err = qclass(
     -with_new => 1,
     is_error => 1,
     error => 'bogus mock',
     );
-    
+
 my $emptyentries = qclass(
     -with_new => 0,
     is_error => 0,
     entries => 0,
     );
-    
+
 my $entries1 = qclass(
     -with_new => 1,
     is_error => 0,
@@ -32,13 +32,13 @@ my $entries1 = qclass(
 my $entry1 = qclass(
     -with_new => 1,
     vals => {cn => "David Precious", dn => 'dprecious', name => 'David Precious', userPrincipalName => 'dprecious@foo.com', sAMAccountName => 'dprecious'},
-    get_value => sub { 
+    get_value => sub {
         my $self = shift;
         my $arg = shift;
         return $self->vals()->{$arg};
         },
     );
-    
+
 my $detail = qclass(
     -with_new => 1,
     is_error => 0,
@@ -49,7 +49,7 @@ my $detail = qclass(
 my $mod = qclass(
     -implement => 'Net::LDAP',
     -with_new => 0,
-    new => sub { my $cls = shift; 
+    new => sub { my $cls = shift;
     bless {}, $cls; },
     disconnect => sub { },
     unbind => sub { $auth_as = ''; },
@@ -57,11 +57,11 @@ my $mod = qclass(
     search => sub {
         my $self = shift;
         my %args = @_;
-        if (my ($uname) = $args{filter} =~ /^\(&\(objectClass=user\)\(sAMAccountName=([^,]+)\)$/) {
+        if (my ($uname) = $args{filter} =~ /^\(&\(objectClass=user\)\(cn=([^,]+)\)$/) {
             return $detail->package->new;
-        } elsif (my ($name, $role) = $args{filter} =~ /^\(\&\(objectClass=user\)\(sAMAccountName=(.+)\)\(memberof=cn=([^,]+)/) {
+        } elsif (my ($name, $var2, $role) = $args{filter} =~ /^\(\&\(\|\(memberOf=cn=(.*)\)\(memberOf=cn=(.*)\)\)\(cn=(.*)\)\)/) {
             if ($name eq "dprecious") {
-                
+
                 diag("ROLE: " . $role);
                 if ($role eq "Jever" or $role eq "Budvar") {
                     return $entries1->package->new;
@@ -98,7 +98,7 @@ BEGIN {
 response_content_is   [ GET => '/' ], 'Index always accessible',
     'Index accessible while not logged in';
 
-response_redirect_location_is  [ GET => '/loggedin' ], 
+response_redirect_location_is  [ GET => '/loggedin' ],
     'http://localhost/login?return_url=%2Floggedin',
     '/loggedin redirected to login page when not logged in';
 
@@ -106,13 +106,13 @@ response_redirect_location_is  [ GET => '/beer' ],
     'http://localhost/login?return_url=%2Fbeer',
     '/beer redirected to login page when not logged in';
 
-response_redirect_location_is  [ GET => '/regex/a' ], 
+response_redirect_location_is  [ GET => '/regex/a' ],
     'http://localhost/login?return_url=%2Fregex%2Fa',
     '/regex/a redirected to login page when not logged in';
 
 # OK, now check we can't log in with fake details
 
-response_status_is  [ 
+response_status_is  [
     POST => '/login', { body => { username => 'foo', password => 'bar' } }
 ], 401, 'Login with fake details fails';
 
@@ -177,7 +177,7 @@ response_redirect_location_is  [ GET => '/loggedin' ],
     'http://localhost/login?return_url=%2Floggedin',
     '/loggedin redirected to login page after logging out';
 
-response_redirect_location_is  [ GET => '/beer' ], 
+response_redirect_location_is  [ GET => '/beer' ],
     'http://localhost/login?return_url=%2Fbeer',
     '/beer redirected to login page after logging out';
 
